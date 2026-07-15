@@ -1,42 +1,63 @@
-# 灰兰的 D&D 冒险档案馆 — Netlify + DeepSeek 版
+# 灰兰的 D&D 冒险档案馆 — Netlify + DeepSeek
 
-本项目使用 Netlify 静态网站、Netlify Function 和 DeepSeek API，无需数据库。
+本项目由静态网页、Netlify Function 和 DeepSeek API 组成，无需数据库。Codex 用于修改、检查和维护代码；线上问答仍由 Netlify Function 调用 DeepSeek API。Codex 不是托管 DeepSeek API 的服务器。
 
-## 部署流程
+## 当前问答方式
 
-1. 在 GitHub 新建一个空仓库。
-2. 把本项目文件全部上传到仓库根目录。
-3. 登录 Netlify，选择 **Add new project → Import an existing project → GitHub**。
-4. 选择该仓库。Netlify 会读取 `netlify.toml`，直接点击 Deploy。
-5. 进入 **Site configuration → Environment variables**，添加：
-   - `DEEPSEEK_API_KEY`：你在 DeepSeek 开放平台创建的 API Key（必填）
-   - `DEEPSEEK_MODEL`：`deepseek-v4-flash`（可选，默认即为此模型）
-   - `AI_ACCESS_CODE`：你发给玩家的问答口令（强烈建议；可选）
-6. 添加变量后，在 Deploys 中点 **Trigger deploy → Deploy site**。
+`netlify/functions/ask.mjs` 会把档案放在问题之前发送给 DeepSeek。当前 19 场档案约 28 万字符，可以完整进入 DeepSeek V4 的上下文，不再使用旧版的“每场最多 3,800 字符、总计最多 24,000 字符”截取方式。
 
-## DeepSeek 设置
+模型以 JSON 返回回答和实际使用的记录 ID。网页只展示这些记录作为来源。档案将来超过安全上限时，函数会自动改用本地检索，并按问题挑选能放入上限的完整场次。
 
-网站调用 `https://api.deepseek.com/chat/completions`。默认使用 `deepseek-v4-flash` 的非思考模式，速度更快，适合档案问答。API Key 只保存在 Netlify 环境变量中，不会发送到玩家浏览器。
+## GitHub 与 Netlify 部署
 
-## 本地预览
+1. 把修改后的文件提交并推送到已经连接 Netlify 的 GitHub 仓库。
+2. Netlify 读取 `netlify.toml`，运行 `npm run build`，然后部署 `public` 和 `netlify/functions`。
+3. 在 Netlify 的 **Site configuration → Environment variables** 设置：
+
+   - `DEEPSEEK_API_KEY`：必填，只放在 Netlify 环境变量中。
+   - `DEEPSEEK_MODEL`：可选，默认 `deepseek-v4-flash`。
+   - `AI_ACCESS_CODE`：强烈建议设置，防止公开网站被他人消耗 API 额度。
+   - `DEEPSEEK_THINKING`：可选。填 `enabled` 开启思考模式；未设置时使用 `disabled`，响应更快。
+   - `DEEPSEEK_MAX_OUTPUT_TOKENS`：可选，默认 `4000`，允许范围 `500`–`12000`。
+   - `AI_MAX_CONTEXT_CHARS`：可选，默认 `700000`，允许范围 `50000`–`900000`。当前档案无需修改此项。
+
+4. 推送后查看 Netlify 的 **Deploys**。如果自动部署未启动，点击 **Trigger deploy → Deploy site**。
+
+不要把 `.env`、API Key 或 Netlify 环境变量的值提交到 GitHub。
+
+## 本地运行与验证
 
 ```bash
 npm install
+npm run build
+npm test
 npm run dev
 ```
 
-在项目根目录创建 `.env`，内容参考 `.env.example`。
+本地运行 Netlify Function 时，在项目根目录创建不会提交的 `.env`：
 
-## 更新记录
+```dotenv
+DEEPSEEK_API_KEY=你的密钥
+DEEPSEEK_MODEL=deepseek-v4-flash
+AI_ACCESS_CODE=自定义访问口令
+DEEPSEEK_THINKING=disabled
+```
 
-网站读取 `public/adventures.json`。替换或编辑该文件后，还需同步 Netlify Function 使用的数据：
+## 更新档案
+
+网页读取 `public/adventures.json`，Netlify Function 使用同步生成的 `netlify/functions/adventures-data.js`。修改 JSON 后执行：
 
 ```bash
 node scripts/sync-data.js
+npm run build
+npm test
 ```
 
-随后提交到 GitHub，Netlify 会自动更新。
+确认通过后提交这两个数据文件。只修改 `public/adventures.json` 会导致网页和 AI 使用不同版本的档案。
 
-## 安全
+## 精度与速度设置
 
-不要把 `DEEPSEEK_API_KEY` 写进前端文件或提交到 GitHub。建议设置 `AI_ACCESS_CODE`，否则任何知道网址的人都能消耗你的 API 余额。
+先使用默认的 `deepseek-v4-flash` 和关闭思考模式。档案全文已经进入上下文，大部分人物、事件、物品和跨场次问题不再受旧检索截断影响。
+
+复杂的因果分析仍不理想时，把 `DEEPSEEK_THINKING` 设为 `enabled`。如果准确度仍不足，再把 `DEEPSEEK_MODEL` 改为 `deepseek-v4-pro`。这两项会增加响应时间或费用，修改后需要在 Netlify 重新部署。
+

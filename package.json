@@ -5,9 +5,11 @@
   "type": "module",
   "scripts": {
     "dev": "netlify dev",
-    "build": "node scripts/validate-data.js"
+    "build": "node scripts/validate-data.js",
+    "test": "node scripts/test-ask.mjs"
   },
   "devDependencies": {
     "netlify-cli": "^23.0.0"
   }
 }
+

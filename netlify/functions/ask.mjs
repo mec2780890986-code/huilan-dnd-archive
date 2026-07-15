@@ -1,12 +1,11 @@
 import records from "./adventures-data.js";
 
-const json = (statusCode, body) => ({
-  statusCode,
+const json = (status, body) => new Response(JSON.stringify(body), {
+  status,
   headers: {
     "content-type": "application/json; charset=utf-8",
     "cache-control": "no-store"
-  },
-  body: JSON.stringify(body)
+  }
 });
 
 function normalize(value = "") {
@@ -99,7 +98,14 @@ export default async (request) => {
 
   const { qTerms, selected } = selectRecords(question);
   const context = buildContext(selected, qTerms);
-  const model = process.env.DEEPSEEK_MODEL || "deepseek-v4-flash";
+  const configuredModel = String(process.env.DEEPSEEK_MODEL || "deepseek-v4-flash").trim();
+  // Compatibility with older setup guides. Current DeepSeek model IDs are
+  // deepseek-v4-flash and deepseek-v4-pro.
+  const modelAliases = {
+    "deepseek-chat": "deepseek-v4-flash",
+    "deepseek-reasoner": "deepseek-v4-pro"
+  };
+  const model = modelAliases[configuredModel] || configuredModel;
 
   const response = await fetch("https://api.deepseek.com/chat/completions", {
     method: "POST",
@@ -126,10 +132,24 @@ export default async (request) => {
     })
   });
 
-  const data = await response.json();
+  const responseText = await response.text();
+  let data = {};
+  try { data = responseText ? JSON.parse(responseText) : {}; }
+  catch { data = { raw: responseText }; }
+
   if (!response.ok) {
-    console.error("DeepSeek error", data);
-    return json(response.status === 429 ? 429 : 502, { error: data?.error?.message || "DeepSeek 服务请求失败。" });
+    console.error("DeepSeek error", { status: response.status, model, data });
+    const upstreamMessage = data?.error?.message || data?.message || "DeepSeek 服务请求失败。";
+    const hints = {
+      400: "请检查 DEEPSEEK_MODEL。建议使用 deepseek-v4-flash。",
+      401: "DeepSeek API Key 无效或已被撤销。",
+      402: "DeepSeek 账户余额不足或未开通 API 计费。",
+      429: "请求过于频繁或触发额度限制，请稍后再试。"
+    };
+    return json(response.status === 429 ? 429 : 502, {
+      error: `${upstreamMessage}${hints[response.status] ? ` ${hints[response.status]}` : ""}`,
+      code: `DEEPSEEK_${response.status}`
+    });
   }
 
   const answer = data?.choices?.[0]?.message?.content?.trim();
